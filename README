@@ -1,0 +1,10 @@
+# Monte Carlo Option Pricing 📈
+
+This project implements a Monte Carlo simulation for pricing a European call option using Python.
+
+## Features
+
+- Simulates thousands of random stock paths
+- Uses risk-neutral valuation
+- Easy to adjust inputs: stock price, volatility, strike, etc.
+
