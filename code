@@ -1,19 +1,90 @@
-import numpy as np 
+import os
+import math
+import numpy as np
+from scipy.stats import norm
+import matplotlib.pyplot as plt
 
-def monte_carlo_call_option_price(S0, K, T, r, sigma, n_simulations):
-    Z = np.random.standard_normal(n_simulations)
+
+def bs_call_price(S0: float, K: float, T: float, r: float, sigma: float) -> float:
+    """Black–Scholes price for a European call."""
+    if T <= 0 or sigma <= 0:
+        # edge cases: instant expiry or zero vol
+        return max(0.0, S0 - K) * math.exp(-r * T)
+    d1 = (math.log(S0 / K) + (r + 0.5 * sigma**2) * T) / (sigma * math.sqrt(T))
+    d2 = d1 - sigma * math.sqrt(T)
+    return S0 * norm.cdf(d1) - K * math.exp(-r * T) * norm.cdf(d2)
+
+
+def mc_call_price(
+    S0: float, K: float, T: float, r: float, sigma: float, n_paths: int, seed: int | None = 42
+):
+    """
+    Monte Carlo estimator (risk-neutral) for a European call.
+    Returns: price_hat, std_error, (ci_low, ci_high), ST (array of terminal prices).
+    """
+    rng = np.random.default_rng(seed)
+    Z = rng.standard_normal(n_paths)
+
+    # simulate terminal price under risk-neutral GBM
     ST = S0 * np.exp((r - 0.5 * sigma**2) * T + sigma * np.sqrt(T) * Z)
-    payoffs = np.maximum(ST - K, 0)
-    option_price = np.exp(-r * T) * np.mean(payoffs)
-    return option_price
+
+    # discounted payoff
+    df = np.exp(-r * T)
+    payoffs = np.maximum(ST - K, 0.0)
+    price_hat = df * np.mean(payoffs)
+
+    # standard error of the MC estimator
+    # var(df*payoff) = df^2 * var(payoff); se = sqrt(var/n)
+    se = df * np.std(payoffs, ddof=1) / np.sqrt(n_paths)
+
+    # 95% CI using normal approximation (good for large n)
+    ci_low = price_hat - 1.96 * se
+    ci_high = price_hat + 1.96 * se
+    return price_hat, se, (ci_low, ci_high), ST
+
+
+def plot_ST_hist(ST: np.ndarray, K: float, out_path: str):
+    """Plot and save the distribution of S_T with the strike marked."""
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    plt.figure()
+    plt.hist(ST, bins=60, alpha=0.85)
+    # strike marker
+    plt.axvline(K, linestyle="--")
+    plt.title("Distribution of Simulated Terminal Prices $S_T$")
+    plt.xlabel("$S_T$")
+    plt.ylabel("Frequency")
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150)
+    plt.close()
+
 
 if __name__ == "__main__":
-    S0 = 100      # initial price
-    K = 105       # strike price
-    T = 1.0       # maturity (years)
-    r = 0.05      # risk-free rate
-    sigma = 0.2   # volatility
-    n = 100_000   # simulations
+    # ---------- parameters (edit these) ----------
+    S0 = 100.0     # initial price
+    K = 105.0      # strike
+    T = 1.0        # years to maturity
+    r = 0.05       # risk-free rate (annual, cont. comp.)
+    sigma = 0.20   # volatility (annual)
+    n_paths = 200_000
+    seed = 42
+    # --------------------------------------------
 
-    price = monte_carlo_call_option_price(S0, K, T, r, sigma, n)
-    print(f"Estimated option price: ${price:.4f}")
+    # Monte Carlo estimate + CI
+    mc_price, se, (ci_low, ci_high), ST = mc_call_price(S0, K, T, r, sigma, n_paths, seed)
+
+    # Black–Scholes comparison
+    bs_price = bs_call_price(S0, K, T, r, sigma)
+
+    # Report
+    print("=== European Call Option (MC vs Black–Scholes) ===")
+    print(f"Inputs: S0={S0}, K={K}, T={T}, r={r}, sigma={sigma}, n_paths={n_paths}")
+    print(f"Monte Carlo price     : {mc_price:.6f}")
+    print(f"  Standard error (SE) : {se:.6f}")
+    print(f"  95% CI              : [{ci_low:.6f}, {ci_high:.6f}]")
+    print(f"Black–Scholes price   : {bs_price:.6f}")
+    print(f"Abs. error (MC - BS)  : {mc_price - bs_price:.6f}")
+
+    # Plot distribution of S_T
+    out_png = "outputs/ST_distribution.png"
+    plot_ST_hist(ST, K, out_png)
+    print(f"\nSaved histogram of S_T to: {out_png}")
